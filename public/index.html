@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Service de Monitoring</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      padding-top: 20px;
+    }
+    .status-indicator {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      margin-right: 10px;
+    }
+    .status-up {
+      background-color: #28a745;
+    }
+    .status-down {
+      background-color: #dc3545;
+    }
+    .status-unknown {
+      background-color: #6c757d;
+    }
+    .card {
+      margin-bottom: 20px;
+    }
+    #responseTimeChart {
+      height: 300px;
+    }
+    .alert-item {
+      padding: 10px;
+      margin-bottom: 5px;
+      border-radius: 5px;
+    }
+    .alert-status-change {
+      background-color: #f8d7da;
+    }
+    .alert-high-latency {
+      background-color: #fff3cd;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="mb-4">Service de Monitoring</h1>
+    
+    <div class="row">
+      <!-- Statut actuel -->
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-header">
+            Statut actuel
+          </div>
+          <div class="card-body">
+            <h5 class="card-title">
+              <span id="statusIndicator" class="status-indicator status-unknown"></span>
+              <span id="currentStatus">Inconnu</span>
+            </h5>
+            <p class="card-text">
+              URL: <span id="targetUrl">-</span><br>
+              Dernière vérification: <span id="lastCheck">-</span><br>
+              Temps de réponse: <span id="responseTime">-</span> ms
+            </p>
+            <button id="checkNowBtn" class="btn btn-primary">Vérifier maintenant</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Graphique -->
+      <div class="col-md-8">
+        <div class="card">
+          <div class="card-header">
+            Temps de réponse
+          </div>
+          <div class="card-body">
+            <canvas id="responseTimeChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Alertes récentes -->
+    <div class="row mt-4">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            Alertes récentes
+          </div>
+          <div class="card-body">
+            <div id="alertsList" class="alerts-container">
+              <p id="noAlerts">Aucune alerte récente</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Initialisation du graphique
+    const ctx = document.getElementById('responseTimeChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Temps de réponse (ms)',
+          data: [],
+          borderColor: 'rgb(75, 192, 192)',
+          tension: 0.1,
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Temps (ms)'
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Heure'
+            }
+          }
+        }
+      }
+    });
+
+    // Fonction pour mettre à jour le statut actuel
+    async function updateStatus() {
+      try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+        
+        const statusIndicator = document.getElementById('statusIndicator');
+        const currentStatus = document.getElementById('currentStatus');
+        
+        statusIndicator.className = 'status-indicator';
+        if (data.status === 'up') {
+          statusIndicator.classList.add('status-up');
+          currentStatus.textContent = 'Opérationnel';
+        } else if (data.status === 'down') {
+          statusIndicator.classList.add('status-down');
+          currentStatus.textContent = 'Hors service';
+        } else {
+          statusIndicator.classList.add('status-unknown');
+          currentStatus.textContent = 'Inconnu';
+        }
+        
+        document.getElementById('targetUrl').textContent = data.url || '-';
+        document.getElementById('lastCheck').textContent = data.lastCheck ? new Date(data.lastCheck).toLocaleString() : '-';
+        document.getElementById('responseTime').textContent = data.responseTime || '-';
+      } catch (error) {
+        console.error('Erreur lors de la récupération du statut:', error);
+      }
+    }
+    
+    // Fonction pour mettre à jour le graphique
+    async function updateChart() {
+      try {
+        const response = await fetch('/api/metrics');
+        const metrics = await response.json();
+        
+        // Trier les métriques par timestamp
+        metrics.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        
+        // Mettre à jour les données du graphique
+        chart.data.labels = metrics.map(m => {
+          const date = new Date(m.timestamp);
+          return date.toLocaleTimeString();
+        });
+        chart.data.datasets[0].data = metrics.map(m => m.responseTime);
+        
+        // Mettre à jour les points de couleur en fonction du statut
+        chart.data.datasets[0].pointBackgroundColor = metrics.map(m => 
+          m.status === 'up' ? 'rgb(40, 167, 69)' : 'rgb(220, 53, 69)'
+        );
+        
+        chart.update();
+        
+        // Mettre à jour la liste des alertes
+        updateAlerts(metrics);
+      } catch (error) {
+        console.error('Erreur lors de la récupération des métriques:', error);
+      }
+    }
+    
+    // Fonction pour mettre à jour les alertes
+    function updateAlerts(metrics) {
+      const alertsList = document.getElementById('alertsList');
+      const noAlerts = document.getElementById('noAlerts');
+      
+      // Extraire toutes les alertes de toutes les métriques
+      const allAlerts = [];
+      metrics.forEach(metric => {
+        if (metric.alerts && metric.alerts.length > 0) {
+          metric.alerts.forEach(alert => {
+            allAlerts.push({
+              ...alert,
+              metricTimestamp: metric.timestamp
+            });
+          });
+        }
+      });
+      
+      // Trier les alertes par timestamp (plus récentes en premier)
+      allAlerts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      // Afficher les alertes
+      if (allAlerts.length > 0) {
+        noAlerts.style.display = 'none';
+        
+        // Effacer les anciennes alertes
+        alertsList.innerHTML = '';
+        
+        // Afficher les 10 dernières alertes
+        const recentAlerts = allAlerts.slice(0, 10);
+        recentAlerts.forEach(alert => {
+          const alertEl = document.createElement('div');
+          alertEl.className = `alert-item alert-${alert.type.replace('_', '-')}`;
+          
+          let alertContent = '';
+          if (alert.type === 'status_change') {
+            const icon = alert.to === 'up' ? '🟢' : '🔴';
+            alertContent = `${icon} <strong>${new Date(alert.timestamp).toLocaleString()}</strong>: Service ${alert.to === 'up' ? 'opérationnel' : 'hors service'}`;
+            if (alert.from) {
+              alertContent += ` (précédemment: ${alert.from})`;
+            }
+            if (alert.error) {
+              alertContent += `<br>Erreur: ${alert.error}`;
+            }
+          } else if (alert.type === 'high_latency') {
+            alertContent = `⚠️ <strong>${new Date(alert.timestamp).toLocaleString()}</strong>: Latence élevée détectée (${alert.responseTime}ms, seuil: ${alert.threshold}ms)`;
+          }
+          
+          alertEl.innerHTML = alertContent;
+          alertsList.appendChild(alertEl);
+        });
+      } else {
+        noAlerts.style.display = 'block';
+      }
+    }
+    
+    // Fonction pour effectuer une vérification manuelle
+    async function checkNow() {
+      try {
+        const button = document.getElementById('checkNowBtn');
+        button.disabled = true;
+        button.textContent = 'Vérification en cours...';
+        
+        await fetch('/api/check', { method: 'POST' });
+        
+        // Mettre à jour les données
+        await updateStatus();
+        await updateChart();
+        
+        button.disabled = false;
+        button.textContent = 'Vérifier maintenant';
+      } catch (error) {
+        console.error('Erreur lors de la vérification manuelle:', error);
+        const button = document.getElementById('checkNowBtn');
+        button.disabled = false;
+        button.textContent = 'Vérifier maintenant';
+      }
+    }
+    
+    // Configurer le bouton de vérification manuelle
+    document.getElementById('checkNowBtn').addEventListener('click', checkNow);
+    
+    // Charger les données initiales
+    updateStatus();
+    updateChart();
+    
+    // Rafraîchir les données toutes les 10 secondes
+    setInterval(() => {
+      updateStatus();
+      updateChart();
+    }, 10000);
+  </script>
+</body>
+</html> 
