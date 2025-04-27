@@ -73,6 +73,71 @@ Configurez le service via les variables d'environnement dans le fichier `.env` :
 | DISCORD_WEBHOOK_URL | URL du webhook Discord | - |
 | METRICS_RETENTION_HOURS | Durée de conservation des métriques (heures) | 24 |
 
+## Guide d'utilisation
+
+### Mise en place pour les applications
+
+#### Surveillance d'application Frontend
+1. **Configuration simple** :
+   - Pointez `TARGET_URL` vers l'URL principale de votre site web
+   ```
+   TARGET_URL=https://votre-site-web.com
+   ```
+
+2. **Configuration avancée** (recommandée) :
+   - Créez une page de santé dans votre frontend (ex: `/health` ou `/status`)
+   - Cette page devrait vérifier les composants essentiels (chargement des assets, état des API, etc.)
+   - Configurez le monitoring pour pointer vers cette page
+   ```
+   TARGET_URL=https://votre-site-web.com/health
+   ```
+
+#### Surveillance d'application Backend
+1. **Configuration simple** :
+   - Pointez vers un endpoint de votre API
+   ```
+   TARGET_URL=https://votre-api.com/v1/resource
+   ```
+
+2. **Configuration avancée** (recommandée) :
+   - Implémentez un endpoint `/health` qui vérifie :
+     - La connexion à la base de données
+     - L'accès aux services externes
+     - L'état du cache
+     - Les ressources systèmes (mémoire, disque)
+   ```
+   TARGET_URL=https://votre-api.com/health
+   ```
+
+### Surveillance de plusieurs services
+
+Pour surveiller à la fois votre frontend et votre backend :
+
+1. Déployez plusieurs instances du service de monitoring avec des configurations différentes
+2. Utilisez le même webhook Discord pour centraliser les alertes
+3. Différenciez-les avec des noms d'instances dans votre configuration
+
+### Consultation des métriques
+
+1. **Via le dashboard** : Accédez à `http://localhost:3000` (ou le port configuré)
+2. **Via l'API REST** : Utilisez les endpoints décrits dans la section "Utilisation de l'API"
+3. **Via les fichiers de logs** : Consultez les fichiers JSON dans le dossier `logs/`
+
+### Personnalisation des alertes
+
+Vous pouvez personnaliser les seuils d'alerte selon vos besoins :
+
+```
+# Pour les sites très rapides
+RESPONSE_THRESHOLD=1000  # Alerte si temps de réponse > 1 seconde
+
+# Pour les applications complexes
+RESPONSE_THRESHOLD=8000  # Alerte si temps de réponse > 8 secondes
+
+# Pour les vérifications très fréquentes
+CHECK_INTERVAL=10        # Vérifie toutes les 10 secondes
+```
+
 ## Utilisation de l'API
 
 ### Obtenir toutes les métriques
